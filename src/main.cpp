@@ -1,18 +1,25 @@
 #include <Arduino.h>
 #include <FastLED.h>
 
+//Buttons
+#define ROTATE_PIN 2
+#define SHIP_PIN 3
+
+// Pots
+#define X_POT A2
+#define Y_POT A3
+
+//Led
 #define DATA_PIN 6
-#define BUTTON_PIN 2
-#define POT_PIN A2
 #define NUM_LEDS 100
+
 #define VERTICAL 1
 #define HORIZONTAL 0
 
 #define SHIP_COLOR CRGB(0x808080) // Beige
-#define SEA_COLOR CRGB(0x00008B) // Medium Aquamarine
+#define SEA_COLOR CRGB(0x00008B)  // Medium Aquamarine
 
 CRGB leds[NUM_LEDS];
-int ship[7] = {3, 1, 8, HORIZONTAL, 1, 8, VERTICAL}; // size, x, y, orient, new x, new y, new orient (0-horizont, 1-vertical)
 
 // FUNCTIONS
 int translateToCRGB(int x, int y)
@@ -82,7 +89,7 @@ void updateShip(int ship[])
     Serial.println("Setting new whites - vertically");
     for (int i = 0; i < ship[0]; i++)
     {
-      leds[translateToCRGB(ship[4], ship[5] + i)]=SHIP_COLOR;
+      leds[translateToCRGB(ship[4], ship[5] + i)] = SHIP_COLOR;
     }
     // Horizontal
   }
@@ -91,7 +98,7 @@ void updateShip(int ship[])
     Serial.println("Setting new whites - horizontally");
     for (int i = 0; i < ship[0]; i++)
     {
-      leds[translateToCRGB(ship[4] + i, ship[5])]=SHIP_COLOR;
+      leds[translateToCRGB(ship[4] + i, ship[5])] = SHIP_COLOR;
     }
   }
 
@@ -130,7 +137,8 @@ void shiftColumn(int ship[], int vector)
   }
 
   //Vertical
-  if((ship[3]==VERTICAL) && ((ship[1] + vector <= 0) || (ship[1] + vector > 10))){
+  if ((ship[3] == VERTICAL) && ((ship[1] + vector <= 0) || (ship[1] + vector > 10)))
+  {
     return;
   }
 
@@ -162,54 +170,76 @@ void ShiftOrientation(int ship[])
   updateShip(ship);
 }
 
+// Vars
+
+// [number][size, x, y, orient, new x, new y, new orient (0-horizont, 1-vertical)]
+int ship[10][7] = {
+    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 0
+    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 1
+    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 2
+    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 3
+
+    {2, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 4
+    {2, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 5
+    {2, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 6
+
+    {3, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 7
+    {3, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 8
+
+    {4, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 9
+};
+
+unsigned int current_ship = 0;
+
 void setup()
 {
   Serial.begin(9600);
-  pinMode(BUTTON_PIN, INPUT);
-  pinMode(POT_PIN, INPUT);
+  pinMode(ROTATE_PIN, INPUT);
+  pinMode(X_POT, INPUT);
 
   FastLED.setMaxPowerInVoltsAndMilliamps(5, 100);
   FastLED.setBrightness(20);
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
   FastLED.clear();
 
-  for(int i=0; i<NUM_LEDS; i++){
-    leds[i]=SEA_COLOR;
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    leds[i] = SEA_COLOR;
   }
 
-  updateShip(ship);
+  updateShip(ship[current_ship]);
   FastLED.show();
 }
 
-unsigned int func = 1;
 void loop()
 {
-  unsigned int apot = analogRead(POT_PIN);  
-  unsigned int apot_map = map(apot, 0, 1023, 1, 11);
+  unsigned int loc_x = map(analogRead(X_POT), 0, 1023, 1, 11);
+  unsigned int loc_y = map(analogRead(Y_POT), 0, 1023, 1, 11);
+  ship[current_ship][4] = loc_x;
+  ship[current_ship][4] = loc_y;
 
-  if(digitalRead(BUTTON_PIN)){
-    if(func<3){
-      func++;
-    }else{
-      func=1;
+  if (digitalRead(ROTATE_PIN))
+  {
+    if (ship[3] == HORIZONTAL)
+    {
+      ship[current_ship][6] = VERTICAL;
     }
-    delay(300);
-  }
-
-  if(func == 1){
-    ship[4] = apot_map;
-  }
-  if(func == 2){
-    ship[5] = apot_map;
-  }
-  if(func == 3){
-    if(apot_map<5){
-      ship[6]=HORIZONTAL;
-    }else{
-      ship[6]=VERTICAL;
+    else
+    {
+      ship[current_ship][6] = HORIZONTAL;
     }
+    delay(200);
   }
-  
-  updateShip(ship);
 
+  if (digitalRead(SHIP_PIN))
+  {
+    if(current_ship<10){
+      current_ship++;
+    }else{
+      current_ship=0;
+    }
+    delay(200);
+  }
+
+  updateShip(ship[current_ship]);
 }
