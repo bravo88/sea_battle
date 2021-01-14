@@ -1,4 +1,3 @@
-// comment to my collgue on an old dell
 #include <Arduino.h>
 #include <FastLED.h>
 
