@@ -1,9 +1,14 @@
 #include <Arduino.h>
 #include <FastLED.h>
+#include <Ship.h>
+//#include <Encoder.h>
 
 //Buttons
-#define ROTATE_PIN 2
-#define SHIP_PIN 3
+#define SHIP_PIN 5
+#define ENCODER_SW_PIN 4
+#define ENCODER_A_PIN 2
+#define ENCODER_B_PIN 3
+#define FUNCTION_PIN 7
 
 // Pots
 #define X_POT A2
@@ -13,8 +18,10 @@
 #define DATA_PIN 6
 #define NUM_LEDS 100
 
-#define VERTICAL 1
-#define HORIZONTAL 0
+#define VERTICAL 1   // True
+#define HORIZONTAL 0 // False
+#define CHANGE_X 1
+#define CHANGE_Y 0
 
 #define SHIP_COLOR CRGB(0x808080) // Beige
 #define SEA_COLOR CRGB(0x00008B)  // Medium Aquamarine
@@ -48,198 +55,128 @@ int translateToCRGB(int x, int y)
   return led_number;
 }
 
-void updateShip(int ship[])
+// Vars
+
+// Ship definitions
+#define NUM_SHIPS 10
+Ship ships[NUM_SHIPS] = {Ship(1), Ship(1), Ship(1), Ship(1), Ship(2), Ship(2), Ship(2), Ship(3), Ship(3), Ship(4)};
+// Encoder my_encoder = (ENCODER_A_PIN, ENCODER_B_PIN);
+
+void drawShips(Ship ships[])
 {
-  /* Serial.print("New x: ");
-  Serial.print(ship[4]);
-  Serial.print(", new y: ");
-  Serial.print(ship[5]);
-  Serial.print(", new orient: ");
-  Serial.println(ship[6]);
-
-  Serial.print("old x: ");
-  Serial.print(ship[1]);
-  Serial.print(", old y: ");
-  Serial.print(ship[2]);
-  Serial.print(", old orient: ");
-  Serial.println(ship[3]); */
-
-  // Setting blacks
-  // Vertical
-  if (ship[3] == VERTICAL)
+  FastLED.clear();
+  for (unsigned int i = 0; i < NUM_SHIPS; i++)
   {
-    for (int i = 0; i < ship[0]; i++)
+    for (int u = 0; u < ships[i].size(); u++)
     {
-      leds[translateToCRGB(ship[1], ship[2] + i)] = SEA_COLOR;
-    }
-    // Horizontal
-  }
-  else
-  {
-    for (int i = 0; i < ship[0]; i++)
-    {
-      leds[translateToCRGB(ship[1] + i, ship[2])] = SEA_COLOR;
+      if (ships[i].orientation() == VERTICAL)
+      {
+        leds[translateToCRGB(ships[i].x, ships[i].y + u)] = SHIP_COLOR;
+      }
+
+      if (ships[i].orientation() == HORIZONTAL)
+      {
+        leds[translateToCRGB(ships[i].x + u, ships[i].y)] = SHIP_COLOR;
+      }
     }
   }
-
-  // Setting new position
-
-  if (ship[6] == VERTICAL)
-  {
-    Serial.println("Setting new whites - vertically");
-    for (int i = 0; i < ship[0]; i++)
-    {
-      leds[translateToCRGB(ship[4], ship[5] + i)] = SHIP_COLOR;
-    }
-    // Horizontal
-  }
-  else
-  {
-    Serial.println("Setting new whites - horizontally");
-    for (int i = 0; i < ship[0]; i++)
-    {
-      leds[translateToCRGB(ship[4] + i, ship[5])] = SHIP_COLOR;
-    }
-  }
-
-  // Updating ship object
-  ship[1] = ship[4];
-  ship[2] = ship[5];
-  ship[3] = ship[6];
 
   FastLED.show();
 }
 
-void shiftRow(int ship[], int vector)
+unsigned int current_ship = 0;
+bool current_function = CHANGE_X;
+
+void changeFunction()
 {
-
-  if ((ship[3] == VERTICAL) && ((ship[0] + ship[2] - 1 + vector > 10) || (ship[2] + vector < 1)))
-  {
-    return;
-  }
-
-  if ((ship[3] == HORIZONTAL) && ((ship[2] + vector <= 0) || (ship[2] + vector > 10)))
-  {
-    return;
-  }
-
-  ship[5] = ship[2] + vector;
-
-  updateShip(ship);
+  current_function = !current_function;
+  Serial.print("Current function: ");
+  Serial.println(current_function);
 }
 
-void shiftColumn(int ship[], int vector)
+void changeShip()
 {
-  // Horizontal
-  if ((ship[3] == HORIZONTAL) && ((ship[1] + vector <= 0) || (ship[1] + ship[0] - 1 + vector > 10)))
+  if (current_ship < NUM_SHIPS - 1)
   {
-    return;
+    current_ship++;
   }
-
-  //Vertical
-  if ((ship[3] == VERTICAL) && ((ship[1] + vector <= 0) || (ship[1] + vector > 10)))
-  {
-    return;
-  }
-
-  ship[4] = ship[1] + vector;
-  updateShip(ship);
-}
-
-void ShiftOrientation(int ship[])
-{
-  // Vertical to horizontal
-  if (ship[3] == VERTICAL)
-  {
-    Serial.println("Vertical to Horizontal");
-    if (ship[0] + ship[1] - 1 <= 10)
-    {
-      ship[6] = HORIZONTAL;
-    }
-  }
-  // Horizontal to vertical
   else
   {
-    Serial.println("Horizontal to Vertical");
-    if (ship[0] + ship[2] - 1 <= 10)
-    {
-      Serial.println("Space check pass");
-      ship[6] = VERTICAL;
-    }
+    current_ship = 0;
   }
-  updateShip(ship);
+  Serial.print("Ship selected: ");
+  Serial.println(current_ship);
 }
-
-// Vars
-
-// [number][size, x, y, orient, new x, new y, new orient (0-horizont, 1-vertical)]
-int ship[10][7] = {
-    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 0
-    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 1
-    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 2
-    {1, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 3
-
-    {2, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 4
-    {2, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 5
-    {2, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 6
-
-    {3, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 7
-    {3, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 8
-
-    {4, 1, 8, HORIZONTAL, 1, 8, VERTICAL}, // 9
-};
-
-unsigned int current_ship = 0;
 
 void setup()
 {
   Serial.begin(9600);
-  pinMode(ROTATE_PIN, INPUT);
-  pinMode(X_POT, INPUT);
+  pinMode(SHIP_PIN, INPUT);
+  pinMode(ENCODER_SW_PIN, INPUT);
+  pinMode(FUNCTION_PIN, INPUT);
+  pinMode(ENCODER_A_PIN, INPUT);
+  pinMode(ENCODER_B_PIN, INPUT);
 
   FastLED.setMaxPowerInVoltsAndMilliamps(5, 100);
   FastLED.setBrightness(20);
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
   FastLED.clear();
-
-  for (int i = 0; i < NUM_LEDS; i++)
-  {
-    leds[i] = SEA_COLOR;
-  }
-
-  updateShip(ship[current_ship]);
   FastLED.show();
+
+  ships[9].x = 5;
+
+  drawShips(ships);
 }
 
 void loop()
 {
-  unsigned int loc_x = map(analogRead(X_POT), 0, 1023, 1, 11);
-  unsigned int loc_y = map(analogRead(Y_POT), 0, 1023, 1, 11);
-  ship[current_ship][4] = loc_x;
-  ship[current_ship][4] = loc_y;
+  // Encoder function
+  static uint16_t state = 0; //, counter = 0;
+  state = (state << 1) | digitalRead(ENCODER_A_PIN) | 0xe000;
 
-  if (digitalRead(ROTATE_PIN))
+  if (state == 0xf000)
   {
-    if (ship[3] == HORIZONTAL)
+    state = 0x0000;
+    if (digitalRead(ENCODER_B_PIN))
     {
-      ship[current_ship][6] = VERTICAL;
+      ships[current_ship].changeLocation(+1, current_function);
+      drawShips(ships);
     }
+    //counter++;
     else
     {
-      ship[current_ship][6] = HORIZONTAL;
+      ships[current_ship].changeLocation(-1, current_function);
+      drawShips(ships);
     }
-    delay(200);
+
+    //counter--;
+    //Serial.println(counter);
   }
 
+  // Cycling through ships
   if (digitalRead(SHIP_PIN))
   {
-    if(current_ship<10){
-      current_ship++;
-    }else{
-      current_ship=0;
-    }
+    changeShip();
     delay(200);
   }
 
-  updateShip(ship[current_ship]);
+  if (digitalRead(FUNCTION_PIN))
+  {
+    changeFunction();
+    delay(500);
+  }
+
+  /*   unsigned int loc_x = map(analogRead(X_POT), 0, 1023, 1, 11);
+  unsigned int loc_y = map(analogRead(Y_POT), 0, 1023, 1, 11);
+  ships[current_ship].x = loc_x;
+  ships[current_ship].y = loc_y; */
+
+  if (!digitalRead(ENCODER_SW_PIN))
+  {
+    Serial.println("Rotating ship");
+    ships[current_ship].rotate();
+    Serial.println(ships[current_ship].orientation());
+    drawShips(ships);
+    delay(200);
+  }
 }
