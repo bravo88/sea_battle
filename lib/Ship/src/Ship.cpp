@@ -8,11 +8,16 @@ Ship::Ship(int size)
 {
     x = 1;
     y = 1;
+    visible = false;
     _orientation = true;
     _size = size;
+    for (int i = 0; i < 4; i++)
+    {
+        compartment_hit[i] = 0;
+    }
 }
 
-int Ship::max_loc()
+unsigned int Ship::max_loc()
 {
     return 10 - _size + 1;
 }
@@ -40,11 +45,11 @@ void Ship::rotate()
 
 void Ship::changeLocation(int vector, bool axis)
 {
-    Serial.println("Changing ship position");
-    Serial.print("Current position: X:");
-    Serial.print(x);
-    Serial.print(", Y:");
-    Serial.println(y);
+    //Serial.println("Changing ship position");
+    //Serial.print("Current position: X:");
+    //Serial.print(x);
+    //Serial.print(", Y:");
+    //Serial.println(y);
 
     // X
     if (axis && _isValidLocation(x + vector, y, _orientation))
@@ -60,7 +65,7 @@ void Ship::changeLocation(int vector, bool axis)
     }
 }
 
-bool Ship::_isValidLocation(int new_x, int new_y, bool new_orientation)
+bool Ship::_isValidLocation(unsigned int new_x, unsigned int new_y, bool new_orientation)
 {
     // Performing check for vertical
     if (new_orientation == VERTICAL)
@@ -83,4 +88,25 @@ bool Ship::_isValidLocation(int new_x, int new_y, bool new_orientation)
 bool Ship::orientation()
 {
     return _orientation;
+}
+
+bool Ship::isSunk()
+{
+    int no_of_hits = 0;
+    for (int i = 0; i < size(); i++)
+    {
+        if (compartment_hit[i])
+        {
+            no_of_hits++;
+        }
+    }
+
+    if (no_of_hits == size())
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
