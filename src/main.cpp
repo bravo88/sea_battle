@@ -1,10 +1,7 @@
-// Redesign blink of burning ship
-// Rename function to "Ping"
-
 #include <Arduino.h>
 #include <FastLED.h>
 #include <Ship.h>
-//#include <Encoder.h>
+#include <Aim.h>
 
 //Buttons
 #define SHIP_PIN 5
@@ -19,8 +16,21 @@
 
 #define VERTICAL 1   // True
 #define HORIZONTAL 0 // False
-#define CHANGE_X 1
+
+// FUNCTIONS
+#define NUM_FUNCTIONS 4
 #define CHANGE_Y 0
+#define CHANGE_X 1
+#define AIM_Y 2
+#define AIM_X 3
+unsigned int current_function = CHANGE_Y;
+
+// MODES
+unsigned int current_mode = 0;
+#define START_MODE 0
+#define AIM_MODE 1
+#define WAIT_MODE 2
+#define END_MODE 3
 
 #define SHIP_COLOR CRGB(0x808080)       // Beige
 #define SEA_COLOR CRGB(0x00008B)        // Medium Aquamarine
@@ -36,6 +46,23 @@ CRGB leds[NUM_LEDS];
 
 const unsigned long blinkInterval = 500;
 unsigned long previousTime = 0;
+
+// Ship definitions
+#define NUM_SHIPS 10
+Ship ships[NUM_SHIPS] = {Ship(1), Ship(1), Ship(1), Ship(1), Ship(2), Ship(2), Ship(2), Ship(3), Ship(3), Ship(4)};
+unsigned int current_ship = 0;
+
+// AIM DEFINITION
+Aim aim;
+
+// SHOT RECORDS
+// 0 - did not shoot
+// 1 - shot
+// 2 - miss
+// 3 - hit
+
+int my_shots[10][10];
+int enemy_shots[10][10];
 
 // FUNCTIONS
 int translateToCRGB(int x, int y)
@@ -57,34 +84,21 @@ int translateToCRGB(int x, int y)
   return led_number;
 }
 
-// Ship definitions
-#define NUM_SHIPS 10
-Ship ships[NUM_SHIPS] = {Ship(1), Ship(1), Ship(1), Ship(1), Ship(2), Ship(2), Ship(2), Ship(3), Ship(3), Ship(4)};
-
-//bool ping(unsigned int x, unsigned int y, int ship = -1);
 bool ping(unsigned int x, unsigned int y, int ship = -1)
 {
   // CHECKING FOR COLLISIONS WITH OTHER SHIPS
+  // CHECKING IF ANY OF THE SHIPS ARE LOCATED AT GIVEN COORDINATES
   for (int i = 0; i < NUM_SHIPS; i++)
   {
     if (i == ship || !ships[i].visible)
       continue;
-    //Serial.print("Checking collision with ship no.");
-    //Serial.println(i);
     for (int u = 0; u < ships[i].size(); u++)
     {
-      //Serial.print("Ships x=");
-      //Serial.print(ships[i].x);
-      //Serial.print(", y=");
-      //Serial.println(ships[i].y + u);
-
       // Target ship orientation vertical
       if (ships[i].orientation() == VERTICAL)
       {
-
         if ((ships[i].x == x) && (ships[i].y + u == y))
         {
-          //Serial.println("Collision detected!!!");
           return true;
         }
       }
@@ -94,25 +108,19 @@ bool ping(unsigned int x, unsigned int y, int ship = -1)
       {
         if ((ships[i].y == y) && (ships[i].x + u == x))
         {
-          //Serial.println("Collision detected!!!");
           return true;
         }
       }
     }
   }
-  //Serial.println("No collisions");
   return false;
 }
 
 bool checkCollisions(int ship)
 {
-  //Serial.println("------------------------");
-  //Serial.println("Checking for collisions");
   if (ships[ship].orientation() == VERTICAL)
   {
-    //Serial.println("Ships orientation is vertical");
-    // DEFINING SEARCH SCOPE
-    //Serial.println("Defining search scope");
+    // DEFINING SEARCH SCOPE AROUND THE ACTIVE SHIP
     for (unsigned int y = ships[ship].y - 1; y <= ships[ship].y + ships[ship].size(); y++)
     {
       if (y == 0)
@@ -125,10 +133,6 @@ bool checkCollisions(int ship)
           x = 1;
         if (x > 10)
           continue;
-        //Serial.print("Looking in y=");
-        //Serial.print(y);
-        //Serial.print(", x=");
-        //Serial.println(x);
         if (ping(x, y, ship))
         {
           return true;
@@ -169,11 +173,9 @@ bool checkCollisions(int ship)
   }
   return false;
 }
-unsigned int current_ship = 0;
 
 void drawShips(Ship ships[])
 {
-  FastLED.clear();
   for (unsigned int i = 0; i < NUM_SHIPS; i++)
   {
     if (!ships[i].visible)
@@ -215,36 +217,150 @@ void drawShips(Ship ships[])
       }
     }
   }
+}
 
+void drawAim(Aim aim)
+{
+  CRGB axis_color = CRGB(0x228B22);
+  CRGB aim_color = CRGB(0xFF0000);
+  // Draws aim on the map
+  // Aim colors are dependent on mode aim/wait
+  for (int i = 1; i <= 10; i++)
+  {
+    leds[translateToCRGB(i, aim.y)] = axis_color;
+    leds[translateToCRGB(aim.x, i)] = axis_color;
+    leds[translateToCRGB(aim.x, aim.y)] = aim_color;
+  }
+}
+
+void drawShots(int shots[10][10])
+{
+  for (int x = 0; x < 10; x++)
+  {
+    for (int y = 0; y < 10; y++)
+    {
+      switch (shots[x][y])
+      {
+      case 1:
+        leds[translateToCRGB(x + 1, y + 1)] = CRGB::Orange;
+        break;
+
+      default:
+        break;
+      }
+    }
+  }
+}
+
+void drawDisplay()
+{
+  FastLED.clear();
+  switch (current_mode)
+  {
+  case 0:
+    drawShips(ships);
+    break;
+  case 1:
+    drawAim(aim);
+    drawShots(my_shots);
+    break;
+  case 2:
+    drawAim(aim);
+    break;
+  default:
+    break;
+  }
   FastLED.show();
 }
 
-bool current_function = CHANGE_X;
+void fire(unsigned int x, unsigned int y)
+{
+  my_shots[x - 1][y - 1] = 1;
+  Serial.println(my_shots[x - 1][y - 1]);
+  drawDisplay();
+}
 
 void changeFunction()
 {
-  current_function = !current_function;
-  Serial.print("Current function: ");
+  switch (current_mode)
+  {
+    // Placing ships
+  case 0:
+    if (current_function == 0)
+    {
+      current_function = 1;
+    }
+    if (current_function == 1)
+    {
+      current_function = 0;
+    }
+    break;
+    // Aiming
+  case 1:
+    if (current_function == 2)
+    {
+      current_function = 3;
+      break;
+    }
+    if (current_function == 3)
+    {
+      current_function = 2;
+      break;
+    }
+  default:
+    break;
+  }
+
+  Serial.print("Curren function: ");
   Serial.println(current_function);
 }
 
-void changeShip()
-
+void checkFunctionButton()
 {
-  if (current_ship < NUM_SHIPS - 1)
+  if (digitalRead(FUNCTION_PIN))
   {
-    current_ship++;
+    changeFunction();
+    delay(200);
   }
-  else
-  {
-    current_ship = 0;
-  }
-  //Serial.print("Ship selected: ");
-  //Serial.println(current_ship);
-  if (!ships[current_ship].visible)
-    ships[current_ship].visible = true;
+}
 
-  drawShips(ships);
+void changeShip()
+{
+  switch (current_mode)
+  {
+  case 0:
+    Serial.println("Changing ship");
+    if (current_ship < NUM_SHIPS - 1)
+    {
+      current_ship++;
+    }
+    else
+    {
+      current_ship = 0;
+    }
+
+    if (!ships[current_ship].visible)
+    {
+      ships[current_ship].visible = true;
+    }
+    drawDisplay();
+    break;
+  case 1:
+    Serial.println("Firing shot");
+    fire(aim.x, aim.y);
+    break;
+  default:
+    break;
+  }
+}
+
+void checkShipButton()
+{
+  if (digitalRead(SHIP_PIN))
+  {
+    changeShip();
+    delay(200);
+  }
 }
 
 void randomLayout()
@@ -263,32 +379,111 @@ void randomLayout()
     {
       //Serial.print("Iteration ");
 
+      // Generating random position for a ship first iteration or if collision detected
       if (checkCollisions(current_ship) || u == 0)
       {
         //Serial.println(u);
         x = random(1, 11);
         y = random(1, 11);
-        bool orientation = random(0, 2);
 
         ships[current_ship].changeLocation(x - ships[current_ship].x, CHANGE_X);
         ships[current_ship].changeLocation(y - ships[current_ship].y, CHANGE_Y);
 
+        // Rotate?
+        bool orientation = random(0, 2);
         if (orientation)
         {
           ships[current_ship].rotate();
         }
-        drawShips(ships);
-        //delay(200);
+        drawDisplay();
       }
       else
       {
-        //Serial.println("100");
         continue;
       }
     }
-    //Serial.println(x);
-    //Serial.println(y);
     changeShip();
+  }
+}
+
+void rotateEncoder(bool encoder, bool direction)
+{
+  int vector = 1;
+  if (!direction)
+  {
+    vector = vector * -1;
+  }
+
+  switch (current_mode)
+  {
+  case 0:
+    // POSITION SHIP
+    if ((current_function == CHANGE_X) || (current_function == CHANGE_Y))
+    {
+      ships[current_ship].changeLocation(vector, current_function);
+      drawDisplay();
+    }
+    break;
+  case 1:
+    // AIM
+    if (current_function == AIM_X)
+    {
+      aim.changeLocation(vector, false);
+      drawDisplay();
+    }
+
+    if (current_function == AIM_Y)
+    {
+      aim.changeLocation(vector, true);
+      drawDisplay();
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+void checkEncoderState()
+{
+  static uint16_t state = 0;
+  state = (state << 1) | digitalRead(ENCODER_A_PIN) | 0xe000;
+
+  if (state == 0xf000)
+  {
+    state = 0x0000;
+    if (digitalRead(ENCODER_B_PIN))
+    {
+      // CLOCWISE
+      rotateEncoder(false, true);
+    }
+    else
+    {
+      // COUNTER CLOCKWISE
+      rotateEncoder(false, false);
+    }
+  }
+}
+
+void checkEncoderButton()
+{
+  if (!digitalRead(ENCODER_SW_PIN))
+  {
+    ships[current_ship].rotate();
+    Serial.println(ships[current_ship].orientation());
+    drawDisplay();
+    delay(200);
+  }
+}
+
+void defineShots()
+{
+  for (int i = 0; i < 10; i++)
+  {
+    for (int u = 0; u < 10; u++)
+    {
+      my_shots[i][u] = 0;
+      enemy_shots[i][u] = false;
+    }
   }
 }
 
@@ -306,18 +501,15 @@ void setup()
   FastLED.setMaxPowerInVoltsAndMilliamps(5, 100);
   FastLED.setBrightness(20);
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
-  FastLED.clear();
-  FastLED.show();
 
   ships[0].visible = true;
-  /*   ships[9].x = 5;
-  ships[9].visible = true;
-  ships[9].compartment_hit[0] = true;
-  ships[9].compartment_hit[1] = true;
-  ships[9].compartment_hit[2] = true;
-  ships[9].compartment_hit[3] = true; */
+  defineShots();
 
-  drawShips(ships);
+  randomLayout();
+
+  current_function = AIM_X;
+  current_mode = AIM_MODE;
+  drawDisplay();
 
   //randomLayout();
 }
@@ -326,56 +518,17 @@ void loop()
 {
   unsigned long currentTime = millis();
 
-  // Encoder function
-  static uint16_t state = 0; //, counter = 0;
-  state = (state << 1) | digitalRead(ENCODER_A_PIN) | 0xe000;
-
-  if (state == 0xf000)
-  {
-    state = 0x0000;
-    if (digitalRead(ENCODER_B_PIN))
-    {
-      ships[current_ship].changeLocation(+1, current_function);
-      drawShips(ships);
-    }
-    //counter++;
-    else
-    {
-      ships[current_ship].changeLocation(-1, current_function);
-      drawShips(ships);
-    }
-
-    //counter--;
-    //Serial.println(counter);
-  }
+  // ENCODER
+  checkEncoderState();
 
   // Cycling through ships
-  if (digitalRead(SHIP_PIN))
-  {
-    changeShip();
-    delay(200);
-  }
+  checkShipButton();
 
-  if (digitalRead(FUNCTION_PIN))
-  {
-    //changeFunction();
-    randomLayout();
-    delay(500);
-  }
+  // Rotating ship
+  checkEncoderButton();
 
-  /*   unsigned int loc_x = map(analogRead(X_POT), 0, 1023, 1, 11);
-  unsigned int loc_y = map(analogRead(Y_POT), 0, 1023, 1, 11);
-  ships[current_ship].x = loc_x;
-  ships[current_ship].y = loc_y; */
-
-  if (!digitalRead(ENCODER_SW_PIN))
-  {
-    Serial.println("Rotating ship");
-    ships[current_ship].rotate();
-    Serial.println(ships[current_ship].orientation());
-    drawShips(ships);
-    delay(200);
-  }
+  // Cycling through functions
+  checkFunctionButton();
 
   if (currentTime - previousTime >= blinkInterval)
   {
@@ -387,7 +540,7 @@ void loop()
     {
       hit_color = hit_color_1;
     }
-    drawShips(ships);
+    //drawDisplay();
 
     previousTime = currentTime;
   }
