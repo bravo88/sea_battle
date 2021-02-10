@@ -2,17 +2,26 @@
 #include <FastLED.h>
 #include <Ship.h>
 #include <Aim.h>
+#include <RH_ASK.h>
+#include <SPI.h>
 
 //Buttons
-#define SHIP_PIN 5
-#define ENCODER_SW_PIN 4
-#define ENCODER_A_PIN 2
-#define ENCODER_B_PIN 3
-#define FUNCTION_PIN 7
+#define WHITE_BTN_PIN 11
+#define BLUE_BTN_PIN 12
+#define ENCODER_1_SW_PIN 6
+#define ENCODER_1_A_PIN 2
+#define ENCODER_1_B_PIN 3
+#define ENCODER_2_SW_PIN 7
+#define ENCODER_2_A_PIN 4
+#define ENCODER_2_B_PIN 5
 
 //Led strip
-#define DATA_PIN 6
+#define DATA_PIN 8
 #define NUM_LEDS 100
+
+// Radio communication
+#define TX_PIN 10
+#define RX_PIN 9
 
 #define VERTICAL 1   // True
 #define HORIZONTAL 0 // False
@@ -27,10 +36,12 @@ unsigned int current_function = CHANGE_Y;
 
 // MODES
 unsigned int current_mode = 0;
-#define START_MODE 0
-#define AIM_MODE 1
-#define WAIT_MODE 2
-#define END_MODE 3
+#define POSITIONING_MODE 0
+#define HANDSHAKE_MODE 1
+#define AIM_MODE 2
+#define WAIT_COORDINATES_MODE 3
+#define WAIT_RESULT_MDOE 4
+#define END_MODE 5
 
 #define SHIP_COLOR CRGB(0x808080)       // Beige
 #define SEA_COLOR CRGB(0x00008B)        // Medium Aquamarine
@@ -45,12 +56,16 @@ CRGB hit_color_2 = HIT_COLOR_2;
 CRGB leds[NUM_LEDS];
 
 const unsigned long blinkInterval = 500;
+const unsigned long transmitInterval = 2000;
 unsigned long previousTime = 0;
 
 // Ship definitions
 #define NUM_SHIPS 10
 Ship ships[NUM_SHIPS] = {Ship(1), Ship(1), Ship(1), Ship(1), Ship(2), Ship(2), Ship(2), Ship(3), Ship(3), Ship(4)};
 unsigned int current_ship = 0;
+
+// COMMUNICATION
+RH_ASK transmitter(2000, RX_PIN, TX_PIN, 0);
 
 // AIM DEFINITION
 Aim aim;
@@ -63,6 +78,13 @@ Aim aim;
 
 int my_shots[10][10];
 int enemy_shots[10][10];
+
+int enc1_a_last;
+int enc1_a_val;
+int enc2_a_last;
+int enc2_a_val;
+
+char message[] = "0";
 
 // FUNCTIONS
 int translateToCRGB(int x, int y)
@@ -257,14 +279,17 @@ void drawDisplay()
   FastLED.clear();
   switch (current_mode)
   {
-  case 0:
+  case POSITIONING_MODE:
     drawShips(ships);
     break;
-  case 1:
+  case HANDSHAKE_MODE:
+    drawShips(ships);
+    break;
+  case AIM_MODE:
     drawAim(aim);
     drawShots(my_shots);
     break;
-  case 2:
+  case WAIT_COORDINATES_MODE:
     drawAim(aim);
     break;
   default:
@@ -284,27 +309,27 @@ void changeFunction()
 {
   switch (current_mode)
   {
-    // Placing ships
-  case 0:
-    if (current_function == 0)
+
+  case POSITIONING_MODE:
+    if (current_function == CHANGE_X)
     {
-      current_function = 1;
+      current_function = CHANGE_Y;
     }
-    if (current_function == 1)
+    if (current_function == CHANGE_Y)
     {
-      current_function = 0;
+      current_function = CHANGE_X;
     }
     break;
-    // Aiming
-  case 1:
-    if (current_function == 2)
+
+  case AIM_MODE:
+    if (current_function == AIM_X)
     {
-      current_function = 3;
+      current_function = AIM_Y;
       break;
     }
-    if (current_function == 3)
+    if (current_function == AIM_Y)
     {
-      current_function = 2;
+      current_function = AIM_X;
       break;
     }
   default:
@@ -315,48 +340,49 @@ void changeFunction()
   Serial.println(current_function);
 }
 
-void checkFunctionButton()
+void handshake()
 {
-  if (digitalRead(FUNCTION_PIN))
+}
+
+void checkBlueButton()
+{
+  if (digitalRead(BLUE_BTN_PIN))
   {
-    changeFunction();
-    delay(200);
+    if ((current_mode == POSITIONING_MODE) || (current_mode == AIM_MODE))
+    {
+      changeFunction();
+      delay(200);
+    }
+
+    if (current_mode == HANDSHAKE_MODE)
+    {
+      handshake();
+    }
   }
 }
 
 void changeShip()
 {
-  switch (current_mode)
+  //Serial.println("Changing ship");
+  if (current_ship < NUM_SHIPS - 1)
   {
-  case 0:
-    Serial.println("Changing ship");
-    if (current_ship < NUM_SHIPS - 1)
-    {
-      current_ship++;
-    }
-    else
-    {
-      current_ship = 0;
-    }
-
-    if (!ships[current_ship].visible)
-    {
-      ships[current_ship].visible = true;
-    }
-    drawDisplay();
-    break;
-  case 1:
-    Serial.println("Firing shot");
-    fire(aim.x, aim.y);
-    break;
-  default:
-    break;
+    current_ship++;
   }
+  else
+  {
+    current_ship = 0;
+  }
+
+  if (!ships[current_ship].visible)
+  {
+    ships[current_ship].visible = true;
+  }
+  drawDisplay();
 }
 
-void checkShipButton()
+void checkWhiteButton()
 {
-  if (digitalRead(SHIP_PIN))
+  if ((digitalRead(WHITE_BTN_PIN)) && (current_mode == POSITIONING_MODE))
   {
     changeShip();
     delay(200);
@@ -408,6 +434,7 @@ void randomLayout()
 
 void rotateEncoder(bool encoder, bool direction)
 {
+
   int vector = 1;
   if (!direction)
   {
@@ -416,16 +443,11 @@ void rotateEncoder(bool encoder, bool direction)
 
   switch (current_mode)
   {
-  case 0:
-    // POSITION SHIP
-    if ((current_function == CHANGE_X) || (current_function == CHANGE_Y))
-    {
-      ships[current_ship].changeLocation(vector, current_function);
-      drawDisplay();
-    }
+  case POSITIONING_MODE:
+    ships[current_ship].changeLocation(vector, encoder);
+    drawDisplay();
     break;
-  case 1:
-    // AIM
+  case AIM_MODE:
     if (current_function == AIM_X)
     {
       aim.changeLocation(vector, false);
@@ -445,33 +467,71 @@ void rotateEncoder(bool encoder, bool direction)
 
 void checkEncoderState()
 {
-  static uint16_t state = 0;
-  state = (state << 1) | digitalRead(ENCODER_A_PIN) | 0xe000;
-
-  if (state == 0xf000)
+  enc1_a_val = digitalRead(ENCODER_1_A_PIN);
+  if (enc1_a_val != enc1_a_last)
   {
-    state = 0x0000;
-    if (digitalRead(ENCODER_B_PIN))
+    if (digitalRead(ENCODER_1_B_PIN) != enc1_a_val)
     {
-      // CLOCWISE
-      rotateEncoder(false, true);
+      rotateEncoder(false, false);
     }
     else
     {
-      // COUNTER CLOCKWISE
-      rotateEncoder(false, false);
+      rotateEncoder(false, true);
     }
   }
+  enc1_a_last = enc1_a_val;
+
+  enc2_a_val = digitalRead(ENCODER_2_A_PIN);
+  if (enc2_a_val != enc2_a_last)
+  {
+    if (digitalRead(ENCODER_2_B_PIN) != enc2_a_val)
+    {
+      rotateEncoder(true, false);
+    }
+    else
+    {
+      rotateEncoder(true, true);
+    }
+  }
+  enc2_a_last = enc2_a_val;
 }
 
 void checkEncoderButton()
 {
-  if (!digitalRead(ENCODER_SW_PIN))
+  if (!digitalRead(ENCODER_1_SW_PIN))
   {
-    ships[current_ship].rotate();
-    Serial.println(ships[current_ship].orientation());
-    drawDisplay();
-    delay(200);
+    Serial.println("Enc 1 btn");
+    if (current_mode == POSITIONING_MODE)
+    {
+      ships[current_ship].rotate();
+      Serial.println(ships[current_ship].orientation());
+      drawDisplay();
+      delay(200);
+    }
+
+    if (current_mode == AIM_MODE)
+    {
+      fire(aim.x, aim.y);
+      delay(200);
+    }
+  }
+
+  if (!digitalRead(ENCODER_2_SW_PIN))
+  {
+    Serial.println("Enc 2 btn");
+    if (current_mode == POSITIONING_MODE)
+    {
+      ships[current_ship].rotate();
+      Serial.println(ships[current_ship].orientation());
+      drawDisplay();
+      delay(200);
+    }
+
+    if (current_mode == AIM_MODE)
+    {
+      fire(aim.x, aim.y);
+      delay(200);
+    }
   }
 }
 
@@ -487,61 +547,125 @@ void defineShots()
   }
 }
 
+// RF CODES
+/*
+0001
+0002
+0003
+0004
+0005
+0006
+0007
+0008
+*/
+
+int sequence = 0;
+
+void transmitData()
+{
+  const char *msg = "0001";
+  transmitter.send((uint8_t *)msg, strlen(msg));
+  transmitter.waitPacketSent();
+  delay(200);
+}
+
+void listenData()
+{
+  uint8_t buf[RH_ASK_MAX_MESSAGE_LEN];
+  uint8_t buflen = sizeof(buf);
+
+  if (transmitter.recv(buf, &buflen)) // Non-blocking
+  {
+    char msg[5];
+    for (int i = 0; i < 4; i++)
+    {
+      msg[i] = (char)buf[i];
+      msg[i+1] = '\0';
+    }
+
+
+    switch (current_mode)
+    {
+    case HANDSHAKE_MODE:
+      if (strcmp(msg, "0001") == 0)
+      {
+        Serial.println("Ready");
+      }
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+
 void setup()
 {
   randomSeed(analogRead(0));
 
-  Serial.begin(9600);
-  pinMode(SHIP_PIN, INPUT);
-  pinMode(ENCODER_SW_PIN, INPUT);
-  pinMode(FUNCTION_PIN, INPUT);
-  pinMode(ENCODER_A_PIN, INPUT);
-  pinMode(ENCODER_B_PIN, INPUT);
+  Serial.begin(115200);
+  pinMode(WHITE_BTN_PIN, INPUT);
+  pinMode(BLUE_BTN_PIN, INPUT);
+  pinMode(ENCODER_1_SW_PIN, INPUT);
+  pinMode(ENCODER_1_A_PIN, INPUT);
+  pinMode(ENCODER_1_B_PIN, INPUT);
+  pinMode(ENCODER_2_SW_PIN, INPUT);
+  pinMode(ENCODER_2_A_PIN, INPUT);
+  pinMode(ENCODER_2_B_PIN, INPUT);
+  pinMode(13, INPUT);
+
+  enc1_a_last = digitalRead(ENCODER_1_A_PIN);
+  enc2_a_last = digitalRead(ENCODER_2_A_PIN);
 
   FastLED.setMaxPowerInVoltsAndMilliamps(5, 100);
   FastLED.setBrightness(20);
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
 
+  transmitter.init();
+
   ships[0].visible = true;
   defineShots();
 
-  randomLayout();
-
   current_function = AIM_X;
-  current_mode = AIM_MODE;
-  drawDisplay();
 
+  // For testing we set random layout and mode for handshaking.
+  // In handshaking mode blue button sets the master allowing to always aim and fire
+  // After the blue button pressed, game starts
+  // If blue button is not pressed, player is set to slave and only sends the results to master
   //randomLayout();
+  current_mode = HANDSHAKE_MODE;
+  drawDisplay();
 }
 
 void loop()
 {
-  unsigned long currentTime = millis();
 
   // ENCODER
   checkEncoderState();
 
   // Cycling through ships
-  checkShipButton();
+  checkWhiteButton();
 
   // Rotating ship
   checkEncoderButton();
 
   // Cycling through functions
-  checkFunctionButton();
+  checkBlueButton();
 
-  if (currentTime - previousTime >= blinkInterval)
+  if (current_mode == HANDSHAKE_MODE)
   {
-    if (hit_color == hit_color_1)
-    {
-      hit_color = hit_color_2;
-    }
-    else
-    {
-      hit_color = hit_color_1;
-    }
-    //drawDisplay();
+    listenData();
+  }
 
+  unsigned long currentTime = millis();
+  if (currentTime - previousTime >= transmitInterval)
+  {
+    //transmitData();
     previousTime = currentTime;
+  }
+
+  if (digitalRead(13) == HIGH)
+  {
+    transmitData();
   }
 }
